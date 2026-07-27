@@ -1,0 +1,13 @@
+{
+  "name": "deliverability-poller",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "imap": "^0.8.19",
+    "mailparser": "^3.6.5"
+  },
+  "scripts": {
+    "start": "node index.js"
+  }
+}
