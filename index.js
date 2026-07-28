@@ -97,14 +97,13 @@ function pollGmailIMAPFolder(mailbox, password, folderName) {
               if (err) return;
 
               const subject = parsed.subject || "";
-              const match = subject.match(/TEST-\d{8}-\d+/); // matches TEST-YYYYMMDD-XXX
-              
-              if (match) {
-                const testRunId = match[0];
-                // Map folder name to UI-friendly name
-                const displayFolder = folderName === '[Gmail]/Spam' ? 'Spam' : 'Inbox';
-                await reportResult(testRunId, mailbox.id, displayFolder);
-              }
+              const match = subject.match(/TEST-\d{8}-\d+/);
+
+               if (match) {
+               const testRunId = match[0];
+               const displayFolder = folderName === '[Gmail]/Spam' ? 'Spam' : 'Inbox';
+               await reportResult(testRunId, mailbox.id, displayFolder);
+                }
             });
           });
         });
