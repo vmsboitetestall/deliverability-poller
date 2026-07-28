@@ -1,6 +1,16 @@
+const http = require('http');
 const { createClient } = require('@supabase/supabase-js');
 const Imap = require('imap');
 const { simpleParser } = require('mailparser');
+
+// Start a dummy server to satisfy Render's port-binding requirement
+const port = process.env.PORT || 10000;
+http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Deliverability Poller is active\n');
+}).listen(port, () => {
+  console.log(`Dummy server listening on port ${port}`);
+});
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
