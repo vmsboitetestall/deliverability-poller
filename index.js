@@ -96,14 +96,27 @@ function pollGmailIMAPFolder(mailbox, password, folderName) {
             simpleParser(stream, async (err, parsed) => {
               if (err) return;
 
-              const subject = parsed.subject || "";
-              const match = subject.match(/TEST-\d{8}-\d+/);
+                  const subject = parsed.subject || "";
 
-               if (match) {
-               const testRunId = match[0];
-               const displayFolder = folderName === '[Gmail]/Spam' ? 'Spam' : 'Inbox';
-               await reportResult(testRunId, mailbox.id, displayFolder);
-                }
+                console.log("================================");
+                console.log("Email Subject:", subject);
+
+                const match = subject.match(/TEST-\d{8}-\d+/);
+
+               console.log("Regex Match:", match);
+
+              if (match) {
+              const testRunId = match[0];
+              const displayFolder = folderName === '[Gmail]/Spam' ? 'Spam' : 'Inbox';
+
+              console.log("Calling reportResult with:", {
+                  testRunId,
+                  mailboxId: mailbox.id,
+                folder: displayFolder
+                });
+
+    await reportResult(testRunId, mailbox.id, displayFolder);
+}
             });
           });
         });
