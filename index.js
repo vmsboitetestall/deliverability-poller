@@ -4,32 +4,63 @@ const { simpleParser } = require('mailparser');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  console.error("Missing SUPABASE_URL or SUPABASE_KEY environment variables.");
+  process.exit(1);
+}
+
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function startPolling() {
   console.log("Starting Mailbox Deliverability Poller...");
-  setInterval(checkAllMailboxes, 60000); // Poll every 60 seconds
+  // Poll every 60 seconds
+  setInterval(checkAllMailboxes, 60000); 
   checkAllMailboxes();
 }
 
 async function checkAllMailboxes() {
+  console.log("Fetching mailboxes from Supabase...");
   const { data: mailboxes, error } = await supabase.from('mailboxes').select('*');
-  if (error || !mailboxes) {
-    console.error("Error fetching mailboxes:", error);
+  
+  if (error) {
+    console.error("Error fetching mailboxes from Supabase:", error.message);
     return;
   }
 
+  if (!mailboxes || mailboxes.length === 0) {
+    console.log("No mailboxes found in the database.");
+    return;
+  }
+
+  console.log(`Found ${mailboxes.length} mailbox(es). Processing...`);
+
   for (const mailbox of mailboxes) {
-    if (mailbox.provider === 'gmail') {
-      pollGmailIMAP(mailbox);
+    // Identify Gmail mailboxes by checking the domain
+    const isGmail = mailbox.email.toLowerCase().endsWith('@gmail.com');
+    
+    if (isGmail) {
+      // Fallback: If auth_data.password is empty, use the string stored in the 'provider' field
+      const password = mailbox.auth_data?.password || mailbox.provider;
+      
+      if (!password || password.trim() === "") {
+        console.warn(`Skipping ${mailbox.email}: No password found in auth_data or provider fields.`);
+        continue;
+      }
+
+      // Check both 'INBOX' and '[Gmail]/Spam'
+      pollGmailIMAPFolder(mailbox, password, 'INBOX');
+      pollGmailIMAPFolder(mailbox, password, '[Gmail]/Spam');
+    } else {
+      console.log(`Skipping non-Gmail mailbox: ${mailbox.email}`);
     }
   }
 }
 
-function pollGmailIMAP(mailbox) {
+function pollGmailIMAPFolder(mailbox, password, folderName) {
   const imap = new Imap({
     user: mailbox.email,
-    password: mailbox.auth_data.password,
+    password: password,
     host: 'imap.gmail.com',
     port: 993,
     tls: true,
@@ -37,59 +68,98 @@ function pollGmailIMAP(mailbox) {
   });
 
   imap.once('ready', () => {
-    imap.openBox('INBOX', false, (err, box) => {
-      if (err) { imap.end(); return; }
+    imap.openBox(folderName, true, (err, box) => {
+      if (err) {
+        console.error(`Error opening folder "${folderName}" for ${mailbox.email}:`, err.message);
+        imap.end();
+        return;
+      }
 
-      // Search for emails containing "TEST-" in the subject line
+      // Search for emails containing "TEST-" in the subject
       imap.search([['SUBJECT', 'TEST-']], (err, results) => {
-        if (err || !results.length) { imap.end(); return; }
+        if (err) {
+          console.error(`Search error on ${mailbox.email} in ${folderName}:`, err.message);
+          imap.end();
+          return;
+        }
+
+        if (!results || results.length === 0) {
+          // No matching emails in this folder
+          imap.end();
+          return;
+        }
 
         const f = imap.fetch(results, { bodies: '' });
+        
         f.on('message', (msg, seqno) => {
           msg.on('body', (stream, info) => {
             simpleParser(stream, async (err, parsed) => {
               if (err) return;
 
-              // Try to find the Test ID in the subject
               const subject = parsed.subject || "";
-              const match = subject.match(/TEST-\d{8}-\d+/); // e.g. TEST-20260727-001
+              const match = subject.match(/TEST-\d{8}-\d+/); // matches TEST-YYYYMMDD-XXX
+              
               if (match) {
                 const testRunId = match[0];
-                await reportResult(testRunId, mailbox.id, 'Inbox');
+                // Map folder name to UI-friendly name
+                const displayFolder = folderName === '[Gmail]/Spam' ? 'Spam' : 'Inbox';
+                await reportResult(testRunId, mailbox.id, displayFolder);
               }
             });
           });
         });
-        f.once('end', () => { imap.end(); });
+
+        f.once('end', () => {
+          imap.end();
+        });
       });
     });
   });
 
   imap.once('error', (err) => {
-    console.error(`IMAP Error on ${mailbox.email}:`, err.message);
+    console.error(`IMAP connection error on ${mailbox.email} for folder ${folderName}:`, err.message);
   });
 
   imap.connect();
 }
 
 async function reportResult(testRunId, mailboxId, folder) {
-  // Check if this result is already recorded to prevent duplicates
-  const { data } = await supabase
-    .from('deliverability_results')
-    .select('id')
-    .eq('test_run_id', testRunId)
-    .eq('mailbox_id', mailboxId)
-    .limit(1);
+  try {
+    // Check if this result is already recorded
+    const { data, error: selectError } = await supabase
+      .from('deliverability_results')
+      .select('id')
+      .eq('test_run_id', testRunId)
+      .eq('mailbox_id', mailboxId)
+      .limit(1);
 
-  if (data && data.length > 0) return; // Already exists
+    if (selectError) {
+      console.error(`Error checking duplicates for ${testRunId}:`, selectError.message);
+      return;
+    }
 
-  // Insert result
-  await supabase.from('deliverability_results').insert({
-    test_run_id: testRunId,
-    mailbox_id: mailboxId,
-    folder: folder
-  });
-  console.log(`Reported: ${testRunId} found in ${folder} for mailbox ${mailboxId}`);
+    if (data && data.length > 0) {
+      // Result is already recorded
+      return;
+    }
+
+    // Insert new result
+    const { error: insertError } = await supabase
+      .from('deliverability_results')
+      .insert({
+        test_run_id: testRunId,
+        mailbox_id: mailboxId,
+        folder: folder
+      });
+
+    if (insertError) {
+      console.error(`Failed to insert result for ${testRunId}:`, insertError.message, insertError.details);
+    } else {
+      console.log(`[Success] Reported: ${testRunId} found in ${folder} for mailbox ID ${mailboxId}`);
+    }
+  } catch (err) {
+    console.error(`Unexpected error reporting result:`, err);
+  }
 }
 
 startPolling();
