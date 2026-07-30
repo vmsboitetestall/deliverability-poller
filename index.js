@@ -11,6 +11,7 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey);
+console.log("SUPABASE_URL:", supabaseUrl);
 
 async function startPolling() {
   console.log("Starting Mailbox Deliverability Poller...");
