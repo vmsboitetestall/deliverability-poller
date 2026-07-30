@@ -166,8 +166,13 @@ async function reportResult(testRunId, mailboxId, folder) {
       });
 
     if (insertError) {
-      console.error(`Failed to insert result for ${testRunId}:`, insertError.message, insertError.details);
-    } else {
+  console.error("========== INSERT ERROR ==========");
+  console.error("Code:", insertError.code);
+  console.error("Message:", insertError.message);
+  console.error("Details:", insertError.details);
+  console.error("Hint:", insertError.hint);
+  console.error("Full error:", JSON.stringify(insertError, null, 2));
+} else {
       console.log(`[Success] Reported: ${testRunId} found in ${folder} for mailbox ID ${mailboxId}`);
     }
   } catch (err) {
